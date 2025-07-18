@@ -1,0 +1,50 @@
+name: CI Build for BrainCoHand
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-x86_64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libspdlog-dev libfmt-dev patchelf
+
+      - name: Download stark-serialport libs
+        run: |
+          cd thirdparty/stark-serialport-example
+          chmod +x ./download-lib.sh
+          ./download-lib.sh
+
+      - name: Clone and install unitree_sdk2
+        run: |
+          git clone https://github.com/unitreerobotics/unitree_sdk2.git
+          cd unitree_sdk2
+          mkdir build && cd build
+          cmake .. -DBUILD_EXAMPLES=OFF
+          sudo make install
+
+      - name: Build x86_64
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+
+      - name: Copy binaries 
+        run: |
+          mkdir -p deploy/${{ matrix.arch }}/bin
+          mkdir -p deploy/${{ matrix.arch }}/lib
+          cp build/brainco_hand build/example_brainco_hand deploy/${{ matrix.arch }}/bin/
+          cp thirdparty/stark-serialport-example/dist/shared/linux/libbc_stark_sdk.so deploy/${{ matrix.arch }}/lib/
+          for exe in brainco_hand example_brainco_hand; do
+            patchelf --set-rpath "\$ORIGIN/../lib" deploy/${{ matrix.arch }}/bin/$exe
+          done
