@@ -1,0 +1,3 @@
+[submodule "thirdparty/stark-serialport-example"]
+	path = thirdparty/stark-serialport-example
+	url = https://github.com/BrainCoTech/stark-serialport-example.git
