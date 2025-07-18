@@ -34,7 +34,7 @@ jobs:
           cmake .. -DBUILD_EXAMPLES=OFF
           sudo make install
 
-      - name: Build x86_64
+      - name: Build binaries
         run: |
           mkdir -p build && cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release
@@ -42,10 +42,16 @@ jobs:
 
       - name: Copy binaries 
         run: |
-          mkdir -p deploy/${{ matrix.arch }}/bin
-          mkdir -p deploy/${{ matrix.arch }}/lib
-          cp build/brainco_hand build/example_brainco_hand deploy/${{ matrix.arch }}/bin/
-          cp thirdparty/stark-serialport-example/dist/shared/linux/libbc_stark_sdk.so deploy/${{ matrix.arch }}/lib/
+          mkdir -p deploy/x86_64/bin
+          mkdir -p deploy/x86_64/lib
+          cp build/brainco_hand build/example_brainco_hand deploy/x86_64/bin/
+          cp thirdparty/stark-serialport-example/dist/shared/linux/libbc_stark_sdk.so deploy/x86_64/lib/
           for exe in brainco_hand example_brainco_hand; do
-            patchelf --set-rpath "\$ORIGIN/../lib" deploy/${{ matrix.arch }}/bin/$exe
+            patchelf --set-rpath "\$ORIGIN/../lib" deploy/x86_64/bin/$exe
           done
+
+      - name: Upload deploy folder
+        uses: actions/upload-artifact@v3
+        with:
+          name: brainco-x86_64
+          path: deploy/x86_64/
