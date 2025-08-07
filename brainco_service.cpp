@@ -7,6 +7,20 @@
 #include <unitree/idl/go2/MotorStates_.hpp>
 #include <unitree/common/thread/recurrent_thread.hpp>
 
+#include <iostream>
+#include <csignal>
+#include <chrono>
+#include <thread>
+#include <algorithm>
+#include <atomic>
+
+std::atomic<bool> running(true);
+void signal_handler(int signum)
+{
+    std::cout << "\nCtrl+C detected. Exiting loop..." << std::endl;
+    running = false;
+}
+
 // Brainco Hand ID
 constexpr uint8_t L_id = 0x7e;
 constexpr uint8_t R_id = 0x7f;
@@ -22,21 +36,47 @@ int main(int argc, char** argv)
     uint8_t slave_id = vm["id"].as<int>();
 
     /* Config Hand */
-    init_cfg(StarkFirmwareType::STARK_FIRMWARE_TYPE_V2_STANDARD, StarkProtocolType::STARK_PROTOCOL_TYPE_MODBUS, LogLevel::LOG_LEVEL_INFO);
-    
+    init_cfg(StarkHardwareType::STARK_HARDWARE_TYPE_REVO2_BASIC, StarkProtocolType::STARK_PROTOCOL_TYPE_MODBUS, LogLevel::LOG_LEVEL_WARN, 1024);
+
     auto port_name = vm["serial"].as<std::string>();
-    auto handle = modbus_open(port_name.c_str(), baudrate, slave_id);
-    modbus_set_finger_unit_mode(handle, slave_id, FINGER_UNIT_MODE_NORMALIZED);
-
-    // check connection
-    auto info = modbus_get_device_info(handle, slave_id);
-
-    if(NULL == info) {
-        spdlog::critical("Failed to connect hand. Id: {}", slave_id);
+    if (port_name.empty()) {
+        spdlog::critical("Serial port name is empty. Please specify a valid serial port.");
         exit(1);
-    } else {
+    }
+
+    DeviceHandler* handle = nullptr;
+    DeviceInfo* info = nullptr;
+
+    if (slave_id == 126) {
+        handle = modbus_open(port_name.c_str(), baudrate);
+        if (handle != nullptr) {
+            modbus_set_finger_unit_mode(handle, L_id, FINGER_UNIT_MODE_NORMALIZED);
+        }
+        info = modbus_get_device_info(handle, L_id);
+        if(info == nullptr) {
+            spdlog::critical("Failed to connect left hand. Id: {}", slave_id);
+            exit(1);
+        }
         spdlog::info("Slave id: {} SKU Type: {}, Serial Number: {}, Firmware Version: {}\n", slave_id, (uint8_t)info->sku_type, info->serial_number, info->firmware_version);
     }
+    else if (slave_id == 127) {
+        handle = modbus_open(port_name.c_str(), baudrate);
+        if (handle != nullptr) {
+            modbus_set_finger_unit_mode(handle, R_id, FINGER_UNIT_MODE_NORMALIZED);
+        }
+        info = modbus_get_device_info(handle, R_id);
+        if(info == nullptr) {
+            spdlog::critical("Failed to connect right hand. Id: {}", slave_id);
+            exit(1);
+        }
+        spdlog::info("Slave id: {} SKU Type: {}, Serial Number: {}, Firmware Version: {}\n", slave_id, (uint8_t)info->sku_type, info->serial_number, info->firmware_version);   
+    }
+    else {
+        spdlog::critical("Invalid slave id: {}. Only 126 (left) and 127 (right) are supported.", slave_id);
+        exit(1);
+    }
+
+
     std::string ns = "";
     if(info->sku_type == SkuType::SKU_TYPE_SMALL_LEFT) {
         ns = "left";
@@ -63,9 +103,14 @@ int main(int argc, char** argv)
 
     uint16_t positions[6];
     uint16_t speeds[6];
-    while (true)
+
+    signal(SIGINT, signal_handler);
+
+    while (running)
     {
-        for(int i(0); i<6; i++)
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        for (int i = 0; i < 6; i++)
         {
             positions[i] = std::clamp(lowcmd->msg_.cmds()[i].q(), 0.f, 1.f) * 1000;
             speeds[i] = std::clamp(lowcmd->msg_.cmds()[i].dq(), 0.f, 1.f) * 1000;
@@ -73,13 +118,24 @@ int main(int argc, char** argv)
 
         modbus_set_finger_positions_and_speeds(handle, slave_id, positions, speeds, 6);
         auto finger_status = modbus_get_motor_status(handle, slave_id);
-        for(int i(0); i<6; i++)
-        {
-            lowstate->msg_.states()[i].q() = finger_status->positions[i] / 1000.f;
-            lowstate->msg_.states()[i].dq() = finger_status->speeds[i] / 1000.f;
+
+        if (finger_status != nullptr) {
+            for (int i = 0; i < 6; i++) {
+                lowstate->msg_.states()[i].q() = finger_status->positions[i] / 1000.f;
+                lowstate->msg_.states()[i].dq() = finger_status->speeds[i] / 1000.f;
+            }
+            lowstate->unlockAndPublish();
         }
-        lowstate->unlockAndPublish();
+
+        // 1000 Hz loop rate
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+        int sleep_time = 1000.0 - elapsed;
+        if (sleep_time > 0)
+            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
+        free_motor_status_data(finger_status);
     }
+
     
     return 0;
 }

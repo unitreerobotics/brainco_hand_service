@@ -1,8 +1,8 @@
 # BrainCo Hand Service
 
-The G1 can be equipped with BrainCo's [2nd generation Dexterous Hand](https://www.brainco-hz.com/docs/revolimb-hand/product/overview.html), which features 6 degrees of freedom.
+The G1 can be equipped with BrainCo's [2nd generation Dexterous Hand](https://www.brainco.cn/#/product/revo2), which features 6 degrees of freedom.
 
-The dexterous hand is controlled via serial communication, and the manufacturer provides C and Python [SDKs](https://www.brainco-hz.com/docs/revolimb-hand/sdk/c_v2.html).
+The dexterous hand is controlled via serial communication, and the manufacturer provides C and Python [SDKs](https://www.brainco-hz.com/docs/revolimb-hand/revo2/parameters.html).
 
 In this repository, we convert serial messages into DDS messages so they can be used with unitree_sdk2.
 
@@ -18,21 +18,24 @@ In this repository, we convert serial messages into DDS messages so they can be 
 
 ```bash
 sudo apt install libspdlog-dev libfmt-dev
-# you may need to dowload the newest version of `stark-serialport-example` manually.
-# git clone https://github.com/BrainCoTech/stark-serialport-example
+cd ~
+git clone https://github.com/unitreerobotics/brainco_hand_service
+cd ~/brainco_hand_service
+git submodule update --init --depth 1
+# You can also manually download the latest version of https://github.com/BrainCoTech/stark-serialport-example/tree/revo2.
 cd thirdparty/stark-serialport-example
 ./download-lib.sh
 
-cd path/to/brainco_hand_service
+cd ~/brainco_hand_service
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-make
+make -j6
 ```
 
 ## Test
 
 ```bash
-# Terminal 1. Run brainco hand service
+# Terminal 1. Run brainco hand service (The serial port name will be adjusted according to your hardware interface)
 sudo ./brainco_hand --id 126 --serial /dev/ttyUSB0 # 126: left hand, 127: right hand
 # Terminal 2. Run example
 ./example_brainco_hand left # or right
