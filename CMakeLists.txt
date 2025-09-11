@@ -32,5 +32,5 @@ link_libraries(
 )
 
 add_executable(brainco_hand brainco_service.cpp)
-add_executable(example_brainco_hand example/example_brainco_hand.cpp)
+# add_executable(example_brainco_hand example/example_brainco_hand.cpp)
 # add_executable(test_hand_comm example/test_hand_comm.cpp)

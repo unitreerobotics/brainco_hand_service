@@ -1,11 +1,9 @@
 #include "stark-sdk.h"
 #include "param.h"
 
-#include "dds/Publisher.h"
-#include "dds/Subscription.h"
-#include <unitree/idl/go2/MotorCmds_.hpp>
-#include <unitree/idl/go2/MotorStates_.hpp>
+#include <unitree/dds_wrapper/robots/go2/go2.h>
 #include <unitree/common/thread/recurrent_thread.hpp>
+#include <unitree/idl/hg/PressSensorState_.hpp>
 
 #include <iostream>
 #include <csignal>
@@ -21,119 +19,126 @@ void signal_handler(int signum)
     running = false;
 }
 
-// Brainco Hand ID
-constexpr uint8_t L_id = 0x7e;
-constexpr uint8_t R_id = 0x7f;
-constexpr uint32_t baudrate = 460800;
-
 int main(int argc, char** argv)
 {
     /* parser command line arguments */
     auto vm = param::helper(argc, argv);
+    std::string ns = "";
 
     unitree::robot::ChannelFactory::Instance()->Init(0, vm["network_interface"].as<std::string>());
-
-    uint8_t slave_id = vm["id"].as<int>();
+    std::unique_ptr<unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::PressSensorState_>> touch_sensor = nullptr;
 
     /* Config Hand */
-    init_cfg(StarkHardwareType::STARK_HARDWARE_TYPE_REVO2_BASIC, StarkProtocolType::STARK_PROTOCOL_TYPE_MODBUS, LogLevel::LOG_LEVEL_WARN, 1024);
-
-    auto port_name = vm["serial"].as<std::string>();
-    if (port_name.empty()) {
-        spdlog::critical("Serial port name is empty. Please specify a valid serial port.");
-        exit(1);
+    init_cfg(STARK_PROTOCOL_TYPE_MODBUS, LOG_LEVEL_DEBUG);
+    auto port_name = vm["serial"].as<const char *>();
+    auto cfg = auto_detect_modbus_revo2(port_name, true);
+    if (!cfg) {
+        spdlog::critical("Failed to auto-detect Modbus device configuration on port: {}", port_name);
+        return -1;
     }
+    uint8_t slave_id = cfg->slave_id;
+    auto handle = modbus_open(cfg->port_name, cfg->baudrate);
+    free_device_config(cfg);
 
-    DeviceHandler* handle = nullptr;
-    DeviceInfo* info = nullptr;
+    auto info = stark_get_device_info(handle, slave_id);
+    if (info != NULL)
+    {
+        spdlog::info("Slave id: {} SKU Type: {}, Serial Number: {}, Firmware Version: {}\n", \
+            slave_id, (uint8_t)info->sku_type, info->serial_number, info->firmware_version);
 
-    if (slave_id == 126) {
-        handle = modbus_open(port_name.c_str(), baudrate);
-        if (handle != nullptr) {
-            modbus_set_finger_unit_mode(handle, L_id, FINGER_UNIT_MODE_NORMALIZED);
+        // Config namespace based on hand type
+        if(info->sku_type == SkuType::SKU_TYPE_SMALL_LEFT) {
+            ns = "left";
+        } else if(info->sku_type == SkuType::SKU_TYPE_SMALL_RIGHT) {
+            ns = "right";
+        } else if(info->sku_type == SkuType::SKU_TYPE_MEDIUM_LEFT) {
+            ns = "left";
+        } else if(info->sku_type == SkuType::SKU_TYPE_MEDIUM_RIGHT) {
+            ns = "right";
+        }else{
+            spdlog::error("Hand type not supported.");
+            return -1;
         }
-        info = modbus_get_device_info(handle, L_id);
-        if(info == nullptr) {
-            spdlog::critical("Failed to connect left hand. Id: {}", slave_id);
-            exit(1);
+        
+        if (info->hardware_type == STARK_HARDWARE_TYPE_REVO1_TOUCH || info->hardware_type == STARK_HARDWARE_TYPE_REVO2_TOUCH)
+        {
+            // 启用全部触觉传感器
+            stark_enable_touch_sensor(handle, slave_id, 0x1F);
+            usleep(1000 * 1000); // wait for touch sensor to be ready
+            touch_sensor = std::make_unique<unitree::robot::RealTimePublisher<unitree_hg::msg::dds_::PressSensorState_>>("rt/brainco/"+ns+"/touch");
         }
-        spdlog::info("Slave id: {} SKU Type: {}, Serial Number: {}, Firmware Version: {}\n", slave_id, (uint8_t)info->sku_type, info->serial_number, info->firmware_version);
     }
-    else if (slave_id == 127) {
-        handle = modbus_open(port_name.c_str(), baudrate);
-        if (handle != nullptr) {
-            modbus_set_finger_unit_mode(handle, R_id, FINGER_UNIT_MODE_NORMALIZED);
-        }
-        info = modbus_get_device_info(handle, R_id);
-        if(info == nullptr) {
-            spdlog::critical("Failed to connect right hand. Id: {}", slave_id);
-            exit(1);
-        }
-        spdlog::info("Slave id: {} SKU Type: {}, Serial Number: {}, Firmware Version: {}\n", slave_id, (uint8_t)info->sku_type, info->serial_number, info->firmware_version);   
-    }
-    else {
-        spdlog::critical("Invalid slave id: {}. Only 126 (left) and 127 (right) are supported.", slave_id);
-        exit(1);
-    }
-
-
-    std::string ns = "";
-    if(info->sku_type == SkuType::SKU_TYPE_SMALL_LEFT) {
-        ns = "left";
-    } else if(info->sku_type == SkuType::SKU_TYPE_SMALL_RIGHT) {
-        ns = "right";
-    } else if(info->sku_type == SkuType::SKU_TYPE_MEDIUM_LEFT) {
-        ns = "left";
-    } else if(info->sku_type == SkuType::SKU_TYPE_MEDIUM_RIGHT) {
-        ns = "right";
-    }else{
-        spdlog::error("Hand type not supported.");
+    else
+    {
+        spdlog::critical("Failed to connect hand. Id: {}", slave_id);
         return -1;
     }
 
-    /* Config dds */
-    auto lowcmd = std::make_shared<unitree::robot::SubscriptionBase<unitree_go::msg::dds_::MotorCmds_>>("rt/brainco/"+ns+"/cmd");
-    lowcmd->msg_.cmds().resize(6);
-    for(auto & finger : lowcmd->msg_.cmds())
-    {
-        finger.dq() = 1.; // max speed
-    }
-    auto lowstate = std::make_unique<unitree::robot::RealTimePublisher<unitree_go::msg::dds_::MotorStates_>>("rt/brainco/"+ns+"/state");
-    lowstate->msg_.states().resize(6);
+    free_device_info(info);
 
     uint16_t positions[6];
     uint16_t speeds[6];
 
     signal(SIGINT, signal_handler);
 
+
+    /* Config dds */
+    auto lowcmd = std::make_shared<unitree::robot::go2::subscription::MotorCmds>("rt/brainco/"+ns+"/cmd", 6);
+    for(auto & finger : lowcmd->msg_.cmds())
+    {
+        finger.dq() = 1.; // max speed
+    }
+    auto lowstate = std::make_unique<unitree::robot::go2::publisher::MotorStates>("rt/brainco/"+ns+"/state", 6);
+
     while (running)
     {
-        auto start_time = std::chrono::high_resolution_clock::now();
-
         for (int i = 0; i < 6; i++)
         {
             positions[i] = std::clamp(lowcmd->msg_.cmds()[i].q(), 0.f, 1.f) * 1000;
             speeds[i] = std::clamp(lowcmd->msg_.cmds()[i].dq(), 0.f, 1.f) * 1000;
         }
 
-        modbus_set_finger_positions_and_speeds(handle, slave_id, positions, speeds, 6);
-        auto finger_status = modbus_get_motor_status(handle, slave_id);
+        stark_set_finger_positions_and_speeds(handle, slave_id, positions, speeds, 6);
 
-        if (finger_status != nullptr) {
+        // Get motor status
+        auto motor_status = stark_get_motor_status(handle, slave_id);
+
+        if (motor_status != nullptr) {
             for (int i = 0; i < 6; i++) {
-                lowstate->msg_.states()[i].q() = finger_status->positions[i] / 1000.f;
-                lowstate->msg_.states()[i].dq() = finger_status->speeds[i] / 1000.f;
+                lowstate->msg_.states()[i].q() = motor_status->positions[i] / 1000.f;
+                lowstate->msg_.states()[i].dq() = motor_status->speeds[i] / 1000.f;
+                lowstate->msg_.states()[i].tau_est() = motor_status->currents[i] / 1000.f;
+                lowstate->msg_.states()[i].reserve()[0] = motor_status->states[i];
             }
             lowstate->unlockAndPublish();
         }
+        free_motor_status_data(motor_status);
 
-        // 1000 Hz loop rate
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-        int sleep_time = 1000.0 - elapsed;
-        if (sleep_time > 0)
-            std::this_thread::sleep_for(std::chrono::microseconds(sleep_time));
-        free_motor_status_data(finger_status);
+        // Get touch status if applicable
+        if (touch_sensor != nullptr)
+        {
+            auto touch_status = stark_get_touch_status(handle, slave_id);
+
+            if (touch_status != nullptr) {
+                for(int i(0); i<5; i++)
+                {
+                    auto & item = touch_status->items[i];
+                    if(item.status != 0) continue; // invalid
+
+                    // Attention: PressSensorState_ message is not compatible with TouchFingerItem struct
+                    // we just use its data fields to store the values
+                    touch_sensor->msg_.pressure()[i] = item.normal_force1 / 100.f; // Range [0, 25]
+                    touch_sensor->msg_.pressure()[i+5] = item.tangential_force1 / 100.f; // Range [0, 25]
+                    touch_sensor->msg_.temperature()[i] = item.self_proximity1; // ?
+                    touch_sensor->msg_.temperature()[i+5] = item.tangential_direction1; // 0 - 359; 0xFFFF means invalid
+
+                }
+                lowstate->unlockAndPublish();
+            }
+            free_touch_finger_data(touch_status);
+        }
+
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     

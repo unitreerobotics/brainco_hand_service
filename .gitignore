@@ -1,2 +1,6 @@
+# IDE
+.vscode
+
+# cpp
 build
 logs

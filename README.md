@@ -36,7 +36,7 @@ make -j6
 
 ```bash
 # Terminal 1. Run brainco hand service (The serial port name will be adjusted according to your hardware interface)
-sudo ./brainco_hand --id 126 --serial /dev/ttyUSB0 # 126: left hand, 127: right hand
+sudo ./brainco_hand --serial /dev/ttyUSB0
 # Terminal 2. Run example
 ./example_brainco_hand left # or right
 ```

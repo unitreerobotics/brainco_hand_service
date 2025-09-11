@@ -120,8 +120,7 @@ po::variables_map helper(int argc, char** argv)
         ("version,v", "show version")
         ("log", "record log file")
         ("network_interface,n", po::value<std::string>()->default_value(""), "dds network interface")
-        ("serial", po::value<std::string>()->default_value("/dev/ttyUSB0"), "serial port name")
-        ("id", po::value<int>()->default_value(0x7f), "hand id; Default 126(left) 127(right)")
+        ("serial,s", po::value<std::string>()->required(), "serial port name")
         ;
 
     po::variables_map vm;
