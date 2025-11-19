@@ -5,6 +5,9 @@
 
 int main(int argc, char** argv)
 {
+    std::cout << "Usage: sudo " << argv[0] << " [left|right]" << std::endl;
+    std::cout << "Default is 'left' if not specified." << std::endl;
+    
     unitree::robot::ChannelFactory::Instance()->Init(0, "");
 
     std::string ns = argc > 1 ? argv[1] : "left";
@@ -17,9 +20,9 @@ int main(int argc, char** argv)
     auto lowstate = std::make_shared<unitree::robot::SubscriptionBase<unitree_go::msg::dds_::MotorStates_>>("rt/brainco/"+ns+"/state");
     lowstate->wait_for_connection();
 
-    std::array<uint16_t, 6> positions;
+    std::array<float, 6> positions;
 
-    auto hand_ctrl = [&](std::array<uint16_t, 6> & pos)
+    auto hand_ctrl = [&](std::array<float, 6> & pos)
     {
         for(int i(0); i<6; i++)
         {

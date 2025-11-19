@@ -1,16 +1,24 @@
 cmake_minimum_required(VERSION 3.10)
 project(brainco_hand)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug)
+  set(CMAKE_BUILD_TYPE Release)
 endif()
 
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
-  message("Debug mode")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g -O0 -fPIC")
+  message("-- BUILD_TYPE: Debug")
+  add_compile_options(-g -O0 -fPIC)
 else()
-  message("Release mode")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3 -DNDEBUG -fPIC")
+  message("-- BUILD_TYPE: Release")
+  add_compile_options(-O3 -DNDEBUG -fPIC)
+endif()
+
+if(POLICY CMP0167)
+  cmake_policy(SET CMP0167 NEW)
 endif()
 
 find_package(Boost REQUIRED COMPONENTS program_options)
@@ -19,18 +27,19 @@ find_package(yaml-cpp REQUIRED)
 
 include_directories(
   /usr/local/include/ddscxx
-  /usr/local/include/iceoryx/v2.0.2
-  include
-  thirdparty/stark-serialport-example/dist/include
+  ${CMAKE_SOURCE_DIR}/include
 )
 
-link_directories(thirdparty/stark-serialport-example/dist/shared/linux)
+link_directories(
+  ${CMAKE_SOURCE_DIR}/lib
+)
+
 link_libraries(
-  unitree_sdk2 ddsc ddscxx rt pthread fmt
-  libboost_program_options.a yaml-cpp
+  unitree_sdk2 ddsc ddscxx rt pthread
+  libboost_program_options.a yaml-cpp fmt
   bc_stark_sdk
 )
 
-add_executable(brainco_hand brainco_service.cpp)
-add_executable(example_brainco_hand example/example_brainco_hand.cpp)
-# add_executable(test_hand_comm example/test_hand_comm.cpp)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+add_executable(brainco_hand_server main.cpp)
+add_executable(test_brainco_hand_server test/test_brainco_hand_server.cpp)
