@@ -62,12 +62,13 @@ sudo ./brainco_hand_server --network eth0
 # Simplified (defaults apply)
 sudo ./brainco_hand_server
 
-# run test examples
+# at another terminal, run test examples
 # Usage: ./test_brainco_hand_server [left|right]
 # Default is 'left' if not specified.
 # Normally, you should see the dexterous hand repeatedly perform the actions of making a fist and opening.
 
 # test left side
+cd ~/brainco_hand_service/bin
 sudo ./test_brainco_hand_server
 # or test right side
 sudo ./test_brainco_hand_server right
@@ -78,6 +79,7 @@ sudo ./test_brainco_hand_server right
 After completing the above setup and configuration, and successfully testing test_brainco_hand_server, you can configure the test_brainco_hand_server to start automatically on system boot by running the following script:
 
 ```bash
+cd ~/brainco_hand_service
 bash setup_autostart.sh
 ```
 

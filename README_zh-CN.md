@@ -64,12 +64,13 @@ sudo ./brainco_hand_server --network eth0
 # 简化（使用默认配置）
 sudo ./brainco_hand_server
 
-# 运行测试示例
+# 另一个终端，运行测试示例
 # 用法: ./test_brainco_hand_server [left|right]
 # 若未指定，默认为 left。
 # 正常情况下，你会看到灵巧手反复做握拳和张开动作。
 
 # 测试左手
+cd ~/brainco_hand_service/bin
 sudo ./test_brainco_hand_server
 # 或测试右手
 sudo ./test_brainco_hand_server right
@@ -80,6 +81,7 @@ sudo ./test_brainco_hand_server right
 完成上述安装和配置，并成功运行 test_brainco_hand_server 后，你可以通过以下脚本将 test_brainco_hand_server 配置为系统开机自动启动：
 
 ```bash
+cd ~/brainco_hand_service
 bash setup_autostart.sh
 ```
 
