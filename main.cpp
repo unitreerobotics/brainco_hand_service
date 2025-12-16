@@ -134,7 +134,7 @@ void hand_worker(DeviceHandler* handle, uint8_t slave_id, const std::string& ns)
         auto start_time = std::chrono::high_resolution_clock::now();
         update_finger(handle, slave_id, lowcmd.get(), lowstate.get(), ns);
         auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
-        int sleep_us = 2000 - static_cast<int>(elapsed_us); // 500Hz
+        int sleep_us = 10000 - static_cast<int>(elapsed_us); // 100Hz
         if (sleep_us > 0) std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
     }
 
