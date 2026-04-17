@@ -2,3 +2,4 @@ build
 logs
 *vscode
 bin/
+.cache/

@@ -38,7 +38,7 @@ std::vector<std::string> getAvailableSerialPorts() {
 // Hand connection struct
 struct HandConnection {
     DeviceHandler* handle{nullptr};
-    DeviceInfo* info{nullptr};
+    CDeviceInfo* info{nullptr};
     std::string port;
 };
 
@@ -49,18 +49,18 @@ HandConnection try_connect_hand(const std::string& port, uint8_t slave_id) {
 
     DeviceHandler* handle = modbus_open(port.c_str(), baudrate);
     if (!handle) {
-        spdlog::warn("Failed to open {} port", port);
+        spdlog::warn("Failed to open {} at {} baud", port, baudrate);
         return ret;
     }
 
-    DeviceInfo* info = modbus_get_device_info(handle, slave_id);
+    CDeviceInfo* info = stark_get_device_info(handle, slave_id);
     if (!info) {
         spdlog::warn("Failed to get device info from {} port", port);
         modbus_close(handle);
         return ret;
     }
 
-    modbus_set_finger_unit_mode(handle, slave_id, FINGER_UNIT_MODE_NORMALIZED);
+    stark_set_finger_unit_mode(handle, slave_id, FINGER_UNIT_MODE_NORMALIZED);
 
     ret.handle = handle;
     ret.info = info;
@@ -80,6 +80,7 @@ HandConnection find_hand(std::vector<std::string>& ports, uint8_t slave_id, cons
             return conn;
         } else {
             modbus_close(conn.handle);
+            free_device_info(conn.info);
             spdlog::warn("Port {} is not {} hand (sku {}). Closed.", port, hand_name, (int)conn.info->sku_type);
         }
     }
@@ -99,10 +100,10 @@ void update_finger(DeviceHandler* handle, uint8_t slave_id,
     }
 
     // Write commands
-    modbus_set_finger_positions_and_speeds(handle, slave_id, positions, speeds, 6);
+    stark_set_finger_positions_and_speeds(handle, slave_id, positions, speeds, 6);
 
     // Read status
-    auto status = modbus_get_motor_status(handle, slave_id);
+    auto status = stark_get_motor_status(handle, slave_id);
     if (!status) return;
 
     for (int i = 0; i < 6; ++i) {
@@ -148,9 +149,7 @@ int main(int argc, char** argv) {
     auto vm = param::helper(argc, argv);
     unitree::robot::ChannelFactory::Instance()->Init(0, vm["network_interface"].as<std::string>());
 
-    init_cfg(StarkHardwareType::STARK_HARDWARE_TYPE_REVO2_BASIC,
-             StarkProtocolType::STARK_PROTOCOL_TYPE_MODBUS,
-             LogLevel::LOG_LEVEL_ERROR, 1024);
+    init_logging(LogLevel::LOG_LEVEL_ERROR);
 
     std::vector<std::string> available_ports = getAvailableSerialPorts();
     if (available_ports.empty()) {
@@ -167,6 +166,9 @@ int main(int argc, char** argv) {
 
     if (left_thread.joinable())  left_thread.join();
     if (right_thread.joinable()) right_thread.join();
+
+    if (left_conn.info)  free_device_info(left_conn.info);
+    if (right_conn.info) free_device_info(right_conn.info);
 
     spdlog::info("exit.");
     return 0;
