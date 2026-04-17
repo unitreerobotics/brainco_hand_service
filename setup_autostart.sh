@@ -47,7 +47,7 @@ WorkingDirectory=$SCRIPT_BIN
 ExecStart=$SCRIPT_BIN/brainco_hand_server
 Restart=always
 RestartSec=5
-Environment="LD_LIBRARY_PATH=$(dirname $SCRIPT_BIN)/lib:$LD_LIBRARY_PATH"
+Environment="LD_LIBRARY_PATH=$(dirname $SCRIPT_BIN)/lib/$(uname -m):$LD_LIBRARY_PATH"
 StandardOutput=journal+console
 StandardError=journal+console
 

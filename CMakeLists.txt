@@ -9,6 +9,13 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+message(STATUS "Current system architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+
+if (NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+  message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}. Supported architectures are aarch64 and x86_64.")
+endif()
+
+
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
   message("-- BUILD_TYPE: Debug")
   add_compile_options(-g -O0 -fPIC)
@@ -31,7 +38,7 @@ include_directories(
 )
 
 link_directories(
-  ${CMAKE_SOURCE_DIR}/lib
+  ${CMAKE_SOURCE_DIR}/lib/${CMAKE_SYSTEM_PROCESSOR}
 )
 
 link_libraries(

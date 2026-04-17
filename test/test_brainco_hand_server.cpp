@@ -35,13 +35,13 @@ int main(int argc, char** argv)
     {
         positions = {0, 0, 0, 0, 0, 0};
         hand_ctrl(positions);
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
         positions = {0, 1, 1, 1, 1, 1};
         hand_ctrl(positions);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
         positions = {1, 1, 1, 1, 1, 1};
         hand_ctrl(positions);
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
     }
     
     return 0;
