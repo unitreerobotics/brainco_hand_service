@@ -28,7 +28,10 @@ std::vector<std::string> getAvailableSerialPorts() {
     std::vector<std::string> ports;
     for (const auto& entry : std::filesystem::directory_iterator("/dev")) {
         std::string path = entry.path().string();
+
         if (path.rfind("/dev/ttyUSB", 0) == 0) ports.push_back(path);
+        if (path.rfind("/dev/ttyHAND", 0) == 0) ports.push_back(path);
+        if (path.rfind("/dev/ttyUN", 0) == 0) ports.push_back(path);
     }
     spdlog::info("Available Serial Ports: {}", fmt::join(ports, ", "));
     return ports;
@@ -59,6 +62,11 @@ HandConnection try_connect_hand(const std::string& port, uint8_t slave_id) {
         modbus_close(handle);
         return ret;
     }
+
+    spdlog::info("Hand hardware_type: {}", info->hardware_type);
+    spdlog::info("Hand sku_type: {}", info->sku_type);
+    spdlog::info("Hand firmware_version: {}", info->firmware_version);
+    spdlog::info("Hand serial_number: {}", info->serial_number);
 
     stark_set_finger_unit_mode(handle, slave_id, FINGER_UNIT_MODE_NORMALIZED);
 
