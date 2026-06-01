@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <cstdlib>
 
 std::atomic<bool> running(true);
 void signal_handler(int) { running = false; }
@@ -22,6 +23,7 @@ void signal_handler(int) { running = false; }
 constexpr uint8_t L_id = 0x7e;
 constexpr uint8_t R_id = 0x7f;
 constexpr uint32_t baudrate = 460800;
+constexpr int kMaxConsecutiveCommFailures = 50;
 
 // ------------------ Utility ------------------
 std::vector<std::string> getAvailableSerialPorts() {
@@ -45,6 +47,17 @@ struct HandConnection {
     std::string port;
 };
 
+void close_hand_connection(HandConnection& conn) {
+    if (conn.handle) {
+        modbus_close(conn.handle);
+        conn.handle = nullptr;
+    }
+    if (conn.info) {
+        free_device_info(conn.info);
+        conn.info = nullptr;
+    }
+}
+
 // Try connecting a hand on a given port
 HandConnection try_connect_hand(const std::string& port, uint8_t slave_id) {
     HandConnection ret;
@@ -62,11 +75,6 @@ HandConnection try_connect_hand(const std::string& port, uint8_t slave_id) {
         modbus_close(handle);
         return ret;
     }
-
-    spdlog::info("Hand hardware_type: {}", info->hardware_type);
-    spdlog::info("Hand sku_type: {}", info->sku_type);
-    spdlog::info("Hand firmware_version: {}", info->firmware_version);
-    spdlog::info("Hand serial_number: {}", info->serial_number);
 
     stark_set_finger_unit_mode(handle, slave_id, FINGER_UNIT_MODE_NORMALIZED);
 
@@ -87,16 +95,30 @@ HandConnection find_hand(std::vector<std::string>& ports, uint8_t slave_id, cons
             ports.erase(std::remove(ports.begin(), ports.end(), port), ports.end());
             return conn;
         } else {
+            int sku_type = static_cast<int>(conn.info->sku_type);
             modbus_close(conn.handle);
             free_device_info(conn.info);
-            spdlog::warn("Port {} is not {} hand (sku {}). Closed.", port, hand_name, (int)conn.info->sku_type);
+            spdlog::warn("Port {} is not {} hand (sku {}). Closed.", port, hand_name, sku_type);
         }
     }
     return {};
 }
 
+bool has_required_hands(const HandConnection& left_conn, const HandConnection& right_conn) {
+    return left_conn.handle && right_conn.handle;
+}
+
+void log_missing_hands(const HandConnection& left_conn, const HandConnection& right_conn) {
+    if (!left_conn.handle) {
+        spdlog::error("Missing left Brainco hand.");
+    }
+    if (!right_conn.handle) {
+        spdlog::error("Missing right Brainco hand.");
+    }
+}
+
 // ------------------ Hand Update Loop ------------------
-void update_finger(DeviceHandler* handle, uint8_t slave_id,
+bool update_finger(DeviceHandler* handle, uint8_t slave_id,
                    unitree::robot::SubscriptionBase<unitree_go::msg::dds_::MotorCmds_>* lowcmd,
                    unitree::robot::RealTimePublisher<unitree_go::msg::dds_::MotorStates_>* lowstate,
                    const std::string& ns) {
@@ -112,7 +134,7 @@ void update_finger(DeviceHandler* handle, uint8_t slave_id,
 
     // Read status
     auto status = stark_get_motor_status(handle, slave_id);
-    if (!status) return;
+    if (!status) return false;
 
     for (int i = 0; i < 6; ++i) {
         lowstate->msg_.states()[i].q()        = status->positions[i] / 1000.f;
@@ -125,6 +147,7 @@ void update_finger(DeviceHandler* handle, uint8_t slave_id,
     }
     lowstate->unlockAndPublish();
     free_motor_status_data(status);
+    return true;
 }
 
 // Worker thread for each hand
@@ -139,9 +162,21 @@ void hand_worker(DeviceHandler* handle, uint8_t slave_id, const std::string& ns)
     auto lowstate = std::make_unique<unitree::robot::RealTimePublisher<unitree_go::msg::dds_::MotorStates_>>("rt/brainco/" + ns + "/state");
     lowstate->msg_.states().resize(6);
 
+    int consecutive_comm_failures = 0;
     while (running) {
         auto start_time = std::chrono::high_resolution_clock::now();
-        update_finger(handle, slave_id, lowcmd.get(), lowstate.get(), ns);
+        if (!update_finger(handle, slave_id, lowcmd.get(), lowstate.get(), ns)) {
+            ++consecutive_comm_failures;
+            if (consecutive_comm_failures == 1 || consecutive_comm_failures % 10 == 0) {
+                spdlog::warn("{} Brainco hand communication failure count: {}", ns, consecutive_comm_failures);
+            }
+            if (consecutive_comm_failures >= kMaxConsecutiveCommFailures) {
+                spdlog::error("{} Brainco hand appears offline. Exiting for systemd restart.", ns);
+                std::exit(1);
+            }
+        } else {
+            consecutive_comm_failures = 0;
+        }
         auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
         int sleep_us = 10000 - static_cast<int>(elapsed_us); // 100Hz
         if (sleep_us > 0) std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
@@ -161,16 +196,24 @@ int main(int argc, char** argv) {
 
     std::vector<std::string> available_ports = getAvailableSerialPorts();
     if (available_ports.empty()) {
-        spdlog::warn("No ttyUSB serial ports found.");
-        return 0;
+        spdlog::error("No ttyUSB serial ports found. Exiting for systemd restart.");
+        return 1;
     }
 
     HandConnection left_conn  = find_hand(available_ports, L_id, {SkuType::SKU_TYPE_SMALL_LEFT, SkuType::SKU_TYPE_MEDIUM_LEFT}, "left");
     HandConnection right_conn = find_hand(available_ports, R_id, {SkuType::SKU_TYPE_SMALL_RIGHT, SkuType::SKU_TYPE_MEDIUM_RIGHT}, "right");
 
+    if (!has_required_hands(left_conn, right_conn)) {
+        log_missing_hands(left_conn, right_conn);
+        spdlog::error("Both left and right Brainco hands must be online. Exiting for systemd restart.");
+        close_hand_connection(left_conn);
+        close_hand_connection(right_conn);
+        return 1;
+    }
+
     std::thread left_thread, right_thread;
-    if (left_conn.handle)  left_thread  = std::thread(hand_worker, left_conn.handle, L_id, "left");
-    if (right_conn.handle) right_thread = std::thread(hand_worker, right_conn.handle, R_id, "right");
+    left_thread  = std::thread(hand_worker, left_conn.handle, L_id, "left");
+    right_thread = std::thread(hand_worker, right_conn.handle, R_id, "right");
 
     if (left_thread.joinable())  left_thread.join();
     if (right_thread.joinable()) right_thread.join();
